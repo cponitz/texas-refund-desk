@@ -24,6 +24,10 @@ before touching anything; it defines every module, table, column and flow.
   tool requires a decision ID from claude/decisions.md in the PR description.
 - Fees: a charge happens only after an observed refund in an official record + notice (B-13, SPEC-05).
   Never write code that charges on approval or on a customer's reply.
+- Stripe (SPEC-03, ADR 0021): `STRIPE_ENABLED=true` in production only when the keys are live keys or no real letter has
+  been mailed yet — a real customer must never meet a test-mode card form. The flag and both keys live only in the function
+  secrets; the page reads `features.card` from the API. Never store a card number, expiry or CVC; the schema has nowhere
+  to put them and `check_schema.sql` fails if a column appears.
 - Data model v2 (SPEC-04): `customers` = person/account, `claims` = engagement, `filings` = packet.
   Findings are structured (`claims.findings` jsonb); never build prose status strings.
 - Never log, print or store an unmasked driver's-license number. Images live only in the private

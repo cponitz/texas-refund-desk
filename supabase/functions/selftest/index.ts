@@ -6,7 +6,10 @@
 //   mismatch          situs moved to Brodie Ln, ID says Duval  -> needs_dl_update
 //   mismatch_then_fix mismatch, then a matching ID re-uploaded through the SPEC-02 path -> ready_to_submit with a second
 //                     packet; a further re-upload on the now-ready claim must be refused with 409.
-// Every scenario also probes GET /claim/precheck (SPEC-06 §3) with the situs (expect match) and another address (expect
+//   card              SPEC-03: flag-independent — GET /claim must carry `features {card, stripe_publishable_key}` with a
+//                     consistent shape, and POST /claim/card must answer 409 card_disabled (flag off) or 404 for a claim id
+//                     that is not this lead's (flag on). A real SetupIntent needs a browser (eval/web_smoke.py scenario F).
+// Every other scenario also probes GET /claim/precheck (SPEC-06 §3) with the situs (expect match) and another address (expect
 // mismatch) and reports the round-trip time.
 // Only ever touches the synthetic lead CB-TEST-0001 / property 999000001. The photo-quality vision eval runs separately
 // from the repo (eval/run_extraction_eval.py) against 30 synthetic JPEG photos.
@@ -59,10 +62,24 @@ Deno.serve(async (req: Request) => {
   const want = await opsKey(sb);
   if (!want || url.searchParams.get("key") !== want) return new Response("forbidden", { status: 403 });
   const scenario = url.searchParams.get("scenario") ?? "match";
-  if (!["match", "mismatch", "mismatch_then_fix"].includes(scenario)) return Response.json({ error: "unknown scenario" }, { status: 400 });
+  if (!["match", "mismatch", "mismatch_then_fix", "card"].includes(scenario)) return Response.json({ error: "unknown scenario" }, { status: 400 });
   const base = Deno.env.get("SUPABASE_URL")!;
   const t0 = Date.now();
   const headers = { "x-forwarded-for": "203.0.113.7", "user-agent": "selftest" };
+
+  if (scenario === "card") {
+    const rg = await fetch(`${base}/functions/v1/claim?c=${TEST_CODE}`, { headers });
+    const jg = await rg.json().catch(() => ({})) as { features?: { card?: unknown; stripe_publishable_key?: unknown } };
+    const f = jg.features ?? {};
+    const shapeOk = typeof f.card === "boolean" && (f.stripe_publishable_key === null || typeof f.stripe_publishable_key === "string") &&
+      (f.card ? /^pk_(test|live)_/.test(String(f.stripe_publishable_key)) : f.stripe_publishable_key === null);
+    const rc = await fetch(`${base}/functions/v1/claim/card`, { method: "POST", headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ c: TEST_CODE, claim: "00000000-0000-0000-0000-000000000000", confirmation_token: "ctoken_selftest" }) });
+    const jc = await rc.json().catch(() => ({})) as { error?: string };
+    const guardOk = f.card ? rc.status === 404 && jc.error === "not_found" : rc.status === 409 && jc.error === "card_disabled";
+    return Response.json({ scenario, pass: shapeOk && guardOk, elapsed_ms: Date.now() - t0, features: { card: f.card ?? null, key_prefix: typeof f.stripe_publishable_key === "string" ? f.stripe_publishable_key.slice(0, 8) : null },
+      card_route: { http: rc.status, error: jc.error ?? null }, shape_ok: shapeOk, guard_ok: guardOk }, { headers: { "cache-control": "no-store" } });
+  }
 
   // 1. reset the synthetic lead + property for the scenario
   const { data: lead } = await sb.from("leads").select("id").eq("claim_code", TEST_CODE).single();

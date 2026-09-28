@@ -10,6 +10,10 @@
 //   GET  /claim/precheck?c&address&zip     -> {match, id_address, situs} — typed address pre-check (SPEC-06 §3)
 //   POST /claim/events {c, kind, detail}   -> funnel event from the page (SPEC-06 §5)
 //   POST /claim/reply {c, claim, body}     -> the customer's answer to a needs_review question: an inbound `messages` row (SPEC-06 §2)
+//   POST /claim/card {c, claim, confirmation_token | setup_intent}
+//                                          -> save a card to the claim's account: server-confirmed Stripe SetupIntent (SPEC-03 §4.2,
+//                                             ADR 0021); only while STRIPE_ENABLED=true (else 409). Never charges. GET responses carry
+//                                             `features {card, stripe_publishable_key}` so the page knows whether to show the step.
 //   POST /claim/inquiry {kind, ...}        -> a public-site form (address check, exemption/appeal check, business portfolio
 //                                             review): an `inquiries` row we answer by e-mail (SPEC-07). No claim code.
 //   POST /claim (multipart)                -> new claim: eligibility answers, ID upload(s), contact, consents, typed signature,
@@ -22,6 +26,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { clientIp, serviceClient } from "./db.ts";
 import { type Finding, makeFinding, reasonText, renderForCustomer } from "../_shared/findings.ts";
 import type { Extracted, PropertyRec } from "../_shared/validate.ts";
+import { cardFeatures, parseCardBody, saveCard } from "./card.ts";
+import { stripeClient } from "../_shared/stripe.ts";
+import { SITE } from "../_shared/brand.ts";
 import { extFor, followUpMode, isPageEvent, PAGE_EVENTS, parseInquiry, parseTypedFields, precheck, timelineFrom, TYPED_FALLBACK_CODES, typedExtracted } from "./logic.ts";
 
 type SB = ReturnType<typeof serviceClient>;
@@ -37,6 +44,8 @@ const CORS = {
   "cache-control": "no-store",
 };
 const OPEN = ["new", "mailed", "opened"];
+const env = (k: string) => Deno.env.get(k);
+const features = () => cardFeatures(env);   // SPEC-03 §4.1: flag + publishable key served by the API, one home (function secrets)
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", ...CORS } });
@@ -187,7 +196,7 @@ Deno.serve(async (req: Request) => {
     if (claimId) {
       const { data: c } = await sb.from("claims").select("id, status, findings").eq("id", claimId).eq("lead_id", lead.id).maybeSingle();
       if (!c) return json({ ok: false, error: "not_found" }, 404);
-      return json({ ok: true, ...(await claimSummary(sb, c)) });
+      return json({ ok: true, ...(await claimSummary(sb, c)), features: features() });
     }
 
     await sb.from("events").insert({ claim_code: code, kind: "view", detail: { ip, ua } });
@@ -203,6 +212,7 @@ Deno.serve(async (req: Request) => {
         ok: false, error: "closed", status: lead.status, property: { situs_full: prop.situs_full },
         lead: { refund_years: years, est_refund_total: Number(lead.est_refund_total), est_refund_by_year: lead.est_refund_by_year, est_forward_annual: Number(lead.est_forward_annual) },
         claim: c ? await portalSummary(sb, c) : null,
+        features: features(),
       });
     }
     const earliest = years[0] ?? new Date().getFullYear() - 2;
@@ -212,6 +222,7 @@ Deno.serve(async (req: Request) => {
               est_forward_annual: Number(lead.est_forward_annual), tier: lead.tier },
       property: { prop_id: prop.prop_id, owner_name: prop.owner_name, situs_full: prop.situs_full },
       earliest_year: earliest, deadline: `February 1, ${earliest + 3}`,
+      features: features(),
     });
   }
 
@@ -247,6 +258,39 @@ Deno.serve(async (req: Request) => {
     if (error || !m) return json({ ok: false, error: "server_error" }, 500);
     await sb.from("audit_log").insert({ actor: "claim-api", action: "customer_reply", entity: "messages", entity_id: m.id, detail: { code, claim_id: c.id, status: c.status, chars: text.length } });
     return json({ ok: true, message_id: m.id });
+  }
+
+  // ---- POST /claim/card {c, claim, confirmation_token | setup_intent} (SPEC-03) -------------------------------------
+  // The card step's one call. Every attempt is counted (`card_attempt`) for a 10/IP/hour limit; the page only sees Stripe's
+  // customer-facing message; the request body is never logged. `card_saved` is written here, not by the page.
+  if (req.method === "POST" && path.endsWith("/card")) {
+    const parsed = parseCardBody(await req.json().catch(() => null));
+    const code = normCode(parsed?.c ?? null);
+    if (!parsed || !code) return json({ ok: false, error: "bad_request" }, 400);
+    if (await rateLimited(sb, ip, ["card_attempt"], 10)) return json({ ok: false, error: "rate_limited" }, 429);
+    inBackground(sb.from("events").insert({ claim_code: code, kind: "card_attempt", detail: { ip, ua, claim_id: parsed.claim, source: "api", leg: parsed.setup_intent ? "after_action" : "confirm" } }));
+    const store = {
+      async findClaim(c: string, claimId: string) {
+        const found = await loadLead(sb, c);
+        if (!found) return null;
+        const { data } = await sb.from("claims").select("id, customer_id").eq("id", claimId).eq("lead_id", found.lead.id).maybeSingle();
+        return data ?? null;
+      },
+      async loadAccount(id: string) {
+        const { data } = await sb.from("customers").select("id, email, full_name, stripe_customer_id, card_on_file").eq("id", id).maybeSingle();
+        return data ?? null;
+      },
+      async saveStripeCustomer(accountId: string, stripeCustomerId: string) {
+        await sb.from("customers").update({ stripe_customer_id: stripeCustomerId }).eq("id", accountId);
+      },
+      async recordCard(p: { accountId: string; claimId: string; code: string; paymentMethod: string; brand: string | null; last4: string | null; ip: string; ua: string }) {
+        await sb.from("customers").update({ card_on_file: true, card_brand: p.brand, card_last4: p.last4, card_consented_at: new Date().toISOString(), stripe_payment_method_id: p.paymentMethod }).eq("id", p.accountId);
+        await sb.from("events").insert({ claim_code: p.code, kind: "card_saved", detail: { ip: p.ip, ua: p.ua, claim_id: p.claimId, source: "api", brand: p.brand, last4: p.last4 } });
+        await sb.from("audit_log").insert({ actor: "claim-api", action: "card_saved", entity: "customers", entity_id: p.accountId, detail: { code: p.code, claim_id: p.claimId, brand: p.brand, last4: p.last4, payment_method: p.paymentMethod } });
+      },
+    };
+    const r = await saveCard({ ...parsed, c: code }, { enabled: features().card, ip, ua, site: SITE }, store, stripeClient(env("STRIPE_SECRET_KEY") ?? ""));
+    return json(r.body, r.http);
   }
 
   // ---- POST /claim/inquiry {kind, address?, email, company?, properties?, bills?, source_path?} (SPEC-07) ------------

@@ -6,6 +6,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versions are git
 ## [Unreleased]
 
 ### Added
+- **SPEC-03 S2: card on file — the API** (ADR 0021; the page step is S3). `POST /claim/card {c, claim, confirmation_token |
+  setup_intent}` on the `claim` function saves a card to the claim's account with a **server-confirmed Stripe SetupIntent**:
+  the browser hands over the Payment Element's confirmation token, the server creates the Stripe Customer once per account
+  (`customers.stripe_customer_id`, reused by a second claim with the same e-mail) and confirms the intent
+  (`usage=off_session`, no redirects, `Idempotency-Key card:<claim>:<sha256(token)[:16]>`, pinned `Stripe-Version`
+  `2025-09-30.clover`); `requires_action` (3-D Secure) returns the client secret and a second leg with `setup_intent`
+  retrieves the outcome from Stripe; `succeeded` writes `card_on_file`, `card_brand`, `card_last4`, `card_consented_at`,
+  `stripe_payment_method_id`, the event `card_saved` (`source:"api"`, now server-only — removed from the page allowlist)
+  and audit `card_saved` on `customers`. Errors return only Stripe's payer-facing message (`card_declined` /
+  `stripe_error`); the request body is never logged and the logger redacts every value but an id allowlist and masks any
+  12+ digit run. Guards: flag off → 409 `card_disabled`; code/claim mismatch → 404; every call writes `card_attempt` and
+  more than 10 per IP per hour → 429. Every `GET /claim` response (open, closed/portal, poll) now carries `features
+  {card, stripe_publishable_key}` — the flag and the publishable key live only in the function secrets (`STRIPE_ENABLED`,
+  `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`; `card` is true only with all three), so the `NEXT_PUBLIC_STRIPE_*` Vercel
+  variables can go (S3). `_shared/stripe.ts` is three calls over `fetch` with form encoding, no SDK. **Data model:**
+  migration `20260928160000_card_on_file.sql` adds `customers.card_brand`, `card_last4` (`check ~ '^[0-9]{4}$'`),
+  `card_consented_at`, `stripe_payment_method_id`; no column can hold a card number, expiry or CVC; `check_schema.sql`
+  asserts the four columns and the check. `GET /ops` claims carry `customers(card_brand, card_last4)`; `selftest`
+  scenario `card` (also from `/ops` → run selftest) asserts the `features` shape and the route guards without a browser;
+  `eval/reset_test_lead.sql` clears the card fields on the synthetic account. Tests: `_shared/stripe_test.ts` (5) and
+  `claim/card_test.ts` (8) in CI. **Rule** (RUNBOOK §9.1, CLAUDE.md): `STRIPE_ENABLED=true` in production only with live
+  keys or before any real letter has been mailed. Nothing here charges (SPEC-05 task 6).
 - **SPEC-11 L1–L3: the letter batch and Lob send** (ADR 0023; closes G-7 once L4–L6 run). **Batch (Mac):**
   `python -m cleanbill.letters.batch --batch <name> --tier 1 --n 1000 --variant-split 50 --seed <n> --dry-run` reads the
   published `leads` ⋈ `properties`, applies guard rails no flag can switch off (never `estimate_unconfirmed` (B-18), a

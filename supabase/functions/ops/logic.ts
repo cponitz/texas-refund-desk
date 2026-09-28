@@ -21,7 +21,7 @@ export const OPEN_STATUSES = ["submitted", "processing", "needs_dl_update", "nee
 export const CLAIM_STATUSES = ["submitted", "processing", "ready_to_submit", "needs_dl_update", "needs_review", "filed", "approved", "denied", "refunded", "paid", "withdrawn"];
 export const FILING_CHANNELS = ["email", "portal", "mail"] as const;
 export type FilingChannel = (typeof FILING_CHANNELS)[number];
-export const SELFTEST_SCENARIOS = ["match", "mismatch", "mismatch_then_fix"];
+export const SELFTEST_SCENARIOS = ["match", "mismatch", "mismatch_then_fix", "card"];
 export const MUTATING_ACTIONS = ["approve", "discard", "send", "mark_filed", "reprocess", "withdraw", "inquiry_handled", "new_claim", "run_selftest", "system_status"] as const;
 export type OpsAction = (typeof MUTATING_ACTIONS)[number];
 

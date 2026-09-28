@@ -44,7 +44,8 @@ Deno.test("typed fields: parsed from the form, typed_name split, dob/zip sanitis
 });
 
 Deno.test("page events allowlist and file extensions", () => {
-  assertEquals(["validation_shown", "dl_fix_started", "dl_fix_uploaded", "typed_precheck", "card_saved", "card_skipped", "packet_viewed"].every(isPageEvent), true);
+  assertEquals(["validation_shown", "dl_fix_started", "dl_fix_uploaded", "typed_precheck", "card_skipped", "packet_viewed"].every(isPageEvent), true);
+  assertEquals(isPageEvent("card_saved"), false);   // the server writes it after a confirmed SetupIntent (SPEC-03)
   assertEquals(isPageEvent("view"), false);
   assertEquals(isPageEvent("claim_submitted"), false);
   assertEquals([extFor("image/jpeg"), extFor("image/png"), extFor("application/pdf"), extFor("image/heic")], ["jpg", "png", "pdf", "heic"]);
