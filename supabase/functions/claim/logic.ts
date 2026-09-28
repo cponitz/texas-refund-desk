@@ -6,7 +6,7 @@
 import type { Finding } from "../_shared/findings.ts";
 import { addressMatches, type Extracted, type PropertyRec } from "../_shared/validate.ts";
 
-export const PAGE_EVENTS = ["validation_shown", "dl_fix_started", "dl_fix_uploaded", "typed_precheck", "card_saved", "card_skipped", "packet_viewed"] as const;
+export const PAGE_EVENTS = ["validation_shown", "dl_fix_started", "dl_fix_uploaded", "typed_precheck", "card_skipped", "packet_viewed"] as const;   // card_saved is server-written (SPEC-03 §3 item 2)
 export type PageEvent = typeof PAGE_EVENTS[number];
 export const isPageEvent = (k: string): k is PageEvent => (PAGE_EVENTS as readonly string[]).includes(k);
 

@@ -12,4 +12,6 @@ with l as (select id from leads where claim_code = 'CB-TEST-0001'),
 , d5 as (update customers set created_from_claim_id = null where created_from_claim_id in (select id from c))
 , d6 as (delete from claims where lead_id in (select id from l))
 update leads set status = 'new', opened_at = null where claim_code = 'CB-TEST-0001';
+-- SPEC-03 S4: clear the saved test card on the synthetic account (the Stripe test-mode customer can stay; it is reused)
+update customers set card_on_file = false, card_brand = null, card_last4 = null, card_consented_at = null, stripe_payment_method_id = null, stripe_customer_id = null where email = 'selftest@example.com';
 update properties set situs_num='3675', situs_street='DUVAL ST', situs_zip='78721', situs_full='3675 DUVAL ST, AUSTIN, TX 78721' where prop_id = 999000001;

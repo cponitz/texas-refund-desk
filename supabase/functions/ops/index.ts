@@ -266,7 +266,7 @@ async function dashboard(sb: SB, url: URL): Promise<Response> {
   const mail = { batches: ((mailBatches ?? []) as Array<{ batch: string; n: number; sent_at: string | null; delivered: number; returned: number; rejected: number; proof: boolean }>).map((b) => ({ ...b, n: Number(b.n), delivered: Number(b.delivered), returned: Number(b.returned), rejected: Number(b.rejected) })), rejected: Number(mk.rejected ?? 0) };
 
   // v2: `claims` is the engagement (joined to its lead, property and account); findings are structured on the claim.
-  let q = sb.from("claims").select("*, leads(id, claim_code, est_refund_total, prop_id, letter_variant, mailed_at, properties(situs_full, owner_name)), customers(id, email, card_on_file)").order("created_at", { ascending: false }).limit(limit);
+  let q = sb.from("claims").select("*, leads(id, claim_code, est_refund_total, prop_id, letter_variant, mailed_at, properties(situs_full, owner_name)), customers(id, email, card_on_file, card_brand, card_last4)").order("created_at", { ascending: false }).limit(limit);
   if (statusFilter && CLAIM_STATUSES.includes(statusFilter)) q = q.eq("status", statusFilter);
   const { data: custs } = await q;
   const ids = (custs ?? []).map((c) => c.id);

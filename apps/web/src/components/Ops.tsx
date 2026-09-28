@@ -24,7 +24,7 @@ const KPI_TILES: Array<[keyof OpsData["kpis"], string, string?]> = [
   ["ready_to_submit", "Ready to submit", "kpi-accent"], ["needs_dl_update", "Needs DL update", "kpi-warn"], ["needs_review", "Needs review", "kpi-warn"],
   ["filed", "Filed"], ["approved", "Approved"], ["refunded", "Refunded"], ["inquiries_open", "Open inquiries", "kpi-warn"],
 ];
-const SCENARIOS = ["match", "mismatch", "mismatch_then_fix"];
+const SCENARIOS = ["match", "mismatch", "mismatch_then_fix", "card"];
 
 function errText(e: OpsError): string {
   return e.http === 429 ? "Too many failed passwords from this connection. Try again in an hour." : e.http === 403 ? "Wrong password." : `${e.error}${e.hint ? ` — ${e.hint}` : ""}${e.message ? ` — ${e.message}` : ""}`;

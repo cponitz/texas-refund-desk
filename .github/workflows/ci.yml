@@ -27,14 +27,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
         with: { deno-version: v2.x }
-      - run: deno test --no-check --allow-read supabase/functions/process-claim/validate_test.ts supabase/functions/_shared/findings_test.ts supabase/functions/_shared/email_test.ts supabase/functions/_shared/webhook_sig_test.ts supabase/functions/claim/logic_test.ts supabase/functions/ops/logic_test.ts supabase/functions/webhooks/logic_test.ts supabase/functions/webhooks/lob_test.ts
+      - run: deno test --no-check --allow-read supabase/functions/process-claim/validate_test.ts supabase/functions/_shared/findings_test.ts supabase/functions/_shared/email_test.ts supabase/functions/_shared/webhook_sig_test.ts supabase/functions/claim/logic_test.ts supabase/functions/claim/card_test.ts supabase/functions/_shared/stripe_test.ts supabase/functions/ops/logic_test.ts supabase/functions/webhooks/logic_test.ts supabase/functions/webhooks/lob_test.ts
       - name: edge functions type-check
         # The jsr edge-runtime type shim references npm packages that are not installed here, so each entrypoint is
         # checked from a copy with that one import line removed (the runtime provides those globals in production).
         run: |
           set -e
           for f in claim process-claim ops selftest webhooks; do sed '/edge-runtime.d.ts/d' supabase/functions/$f/index.ts > supabase/functions/$f/index.check.ts; done
-          deno check --node-modules-dir=none supabase/functions/_shared/*.ts supabase/functions/claim/logic.ts supabase/functions/webhooks/logic.ts supabase/functions/webhooks/lob.ts supabase/functions/*/index.check.ts
+          deno check --node-modules-dir=none supabase/functions/_shared/*.ts supabase/functions/claim/logic.ts supabase/functions/claim/card.ts supabase/functions/webhooks/logic.ts supabase/functions/webhooks/lob.ts supabase/functions/*/index.check.ts
           rm supabase/functions/*/index.check.ts
   design-system:
     # SPEC-08 Part C lint: no colour or font literal outside apps/web/src/styles, every semantic token resolves in every
